@@ -1,6 +1,9 @@
 import fs from "fs"
 import path from "path"
 import extract from 'extract-zip'
+import { checkCustomRP } from "./checks/customRP.js";
+import { checkMaxscore } from "./checks/maxscore.js";
+import { getItemInfo } from "./util/itemInfo.js";
 
 const checkFiles = (name) => {
 
@@ -8,82 +11,79 @@ const checkFiles = (name) => {
         fs.rmSync("./results/" + name + ".txt", { recursive: true, force: true });
     }
 
-    let maxScoreIsNull = 0
-    let customRP = 0
+    const reports = []
+    let containsNoMaxscore = 0
+    let containsCustomRP = 0
 
     let itemFolders = fs.readdirSync("./" + name + "/items/")
 
     for (const fileindex in itemFolders) {
 
         const filename = itemFolders[fileindex]
+        const itemContent = fs.readFileSync("./" + name + "/items/" + filename + "/qti.xml", 'utf-8')
 
-        let printString = ""
-        let content = fs.readFileSync("./" + name + "/items/" + filename + "/qti.xml", 'utf-8')
+        const itemInfo = getItemInfo(itemContent, name, filename)
+        const customRPReport = checkCustomRP(itemContent)
+        const maxscoreReport = checkMaxscore(itemContent)
+        containsNoMaxscore += maxscoreReport.numberOfIncidents
+        containsCustomRP += customRPReport.numberOfIncidents
 
-        let startIndex = content.indexOf(`<outcomeDeclaration identifier="MAXSCORE"`)
-        let endIndex = content.indexOf(`</outcomeDeclaration>`)
-        let maxScoreString = content.slice(startIndex, endIndex)
-
-        let identifier1 = `https://forfatter.eps.udir.no/#${filename}`
-        let identifier2 = `https://noudi01aup.udir.taocloud.org/#${filename}`
-
-        let customRPString = content.slice(content.indexOf("<responseProcessing"), content.length - 1)
-        let customResponseProcessing = !customRPString.includes("template=")
-
-        let regex1 = new RegExp(" ", 'g');
-        customRPString = customRPString.replace(regex1, "")
-
-        let regex2 = new RegExp("\n", 'g');
-        customRPString = customRPString.replace(regex2, "")
-
-        let regex3 = new RegExp("\t", 'g');
-        customRPString = customRPString.replace(regex3, "")
-
-        if (customRPString.includes("<responseProcessing><responseCondition><responseIf><match>")) {
-            customResponseProcessing = false
-        }
-
-        let maxScore = "X"
-
-        if (maxScoreString.length > 100 && maxScoreString.length < 200) {
-
-            let startValueIndex = maxScoreString.indexOf(`<value>`)
-            let endValueIndex = maxScoreString.indexOf(`</value>`)
-            let value = maxScoreString.slice(startValueIndex, endValueIndex).replace("<value>", "")
-
-            maxScore = parseFloat(value)
-        }
-        const logId = maxScore > 1 || customResponseProcessing || maxScore === "X"
-
-        if (logId) {
-            printString += ("MAXSCORE: " + maxScore + " - " + "Egendefinert skåring: " + customResponseProcessing + "\n")
-            if (customResponseProcessing) {
-                printString += (content.slice(content.indexOf("<responseProcessing"), content.length - 1) + "\n")
-            }
-            printString += (identifier1 + "\n");
-            printString += (identifier2 + "\n");
-            printString += "\n\n\n"
-        }
-
-        let lastString = fs.existsSync("./results/" + name + ".txt") ? fs.readFileSync("./results/" + name + ".txt") : ""
-        fs.writeFileSync("./results/" + name + ".txt", lastString += printString)
-
-        if (maxScore === "X" || maxScore === 0) {
-            maxScoreIsNull++
-        }
-
-        if (customResponseProcessing) {
-            customRP++
-        }
+        reports.push(createItemReport(customRPReport, maxscoreReport, itemInfo))
     }
 
-    let printString = "TOTALT ANTALL OPPGAVER UTEN MAXSCORE            : " +
-        maxScoreIsNull + "\nTOTALT ANTALL OPPGAVER MED EGENDEFINERT SKÅRING : " +
-        customRP + "\n\n"
+    createFinalReport(reports, containsNoMaxscore, containsCustomRP, name)
+}
 
-    let lastString = fs.existsSync("./results/" + name + ".txt") ? fs.readFileSync("./results/" + name + ".txt") : ""
-    fs.writeFileSync("./results/" + name + ".txt", printString += lastString)
-    fs.rmSync("./" + name, { recursive: true })
+
+const createItemReport = (customRPReport, maxscoreReport, itemInfo) => {
+
+    let printString = ""
+
+    const maxscoreValue = maxscoreReport.text
+    const customRPString = customRPReport.text
+    const containsCustomRP = customRPReport.numberOfIncidents === 1
+
+    const shouldCreateReport = maxscoreValue > 1 || containsCustomRP || maxscoreValue === 0
+
+    if (shouldCreateReport) {
+        printString += "LABEL    : " + itemInfo.label + "\n"
+        printString += "RESSURS  : " + itemInfo.identifier + "\n"
+        printString += "MAXSCORE : " + maxscoreValue + "\n"
+        printString += "SKÅRING  : " + customRPString
+        printString += "\n\n"
+
+        const priority = Math.min(customRPReport.priority, maxscoreReport.priority)
+
+        return {
+            priority,
+            printString
+        }
+    }
+    else return null
+}
+
+const createFinalReport = (reports, containsNoMaxscore, containsCustomRP, itemName) => {
+
+    //items
+    const sortedByPriority = reports.filter(report => report).sort((a, b) => { return a.priority - b.priority })
+    for (const index in sortedByPriority){
+        const report = sortedByPriority[index]
+        let lastString = fs.existsSync("./results/" + itemName + ".txt") ? fs.readFileSync("./results/" + itemName + ".txt") : ""
+        fs.writeFileSync("./results/" + itemName + ".txt", lastString += report.printString)
+    }
+
+    //overview
+    let printString = ""
+    printString += "OVERSIKT:" + "\n"
+    printString += "Oppgaver uten maxscore            : " + containsNoMaxscore + "\n"
+    printString += "Oppgaver med egendefinert skåring : " + containsCustomRP + "\n"
+    printString += "\n"
+    printString += "---------------------------------"
+    printString += "\n\n"
+
+    let lastString = fs.existsSync("./results/" + itemName + ".txt") ? fs.readFileSync("./results/" + itemName + ".txt") : ""
+    fs.writeFileSync("./results/" + itemName + ".txt", printString += lastString)
+    fs.rmSync("./" + itemName, { recursive: true })
 }
 
 const getAllTestPaths = () => {
@@ -101,7 +101,7 @@ const checkAllTests = () => {
         fs.mkdirSync("./results")
     }
 
-    paths.forEach(async(p, index) => {
+    paths.forEach(async (p) => {
 
         const name = p.substring(0, p.length - 4)
 
@@ -116,7 +116,6 @@ const checkAllTests = () => {
             checkFiles(name)
         } catch (err) {
             console.log(err);
-            console.log("ERROR D:");
         }
     })
 }
