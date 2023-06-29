@@ -31,9 +31,8 @@ const checkFiles = (name) => {
         reports.push(createItemReport(customRPReport, maxscoreReport, itemInfo))
     }
 
-    createFinalReport(reports, containsNoMaxscore, containsCustomRP, name)
+    createFinalReport(reports, containsNoMaxscore, containsCustomRP, name, itemFolders.length)
 }
-
 
 const createItemReport = (customRPReport, maxscoreReport, itemInfo) => {
 
@@ -58,15 +57,14 @@ const createItemReport = (customRPReport, maxscoreReport, itemInfo) => {
             priority,
             printString
         }
-    }
-    else return null
+    } else return null
 }
 
-const createFinalReport = (reports, containsNoMaxscore, containsCustomRP, itemName) => {
+const createFinalReport = (reports, containsNoMaxscore, containsCustomRP, itemName, numberOfItems) => {
 
     //items
     const sortedByPriority = reports.filter(report => report).sort((a, b) => { return a.priority - b.priority })
-    for (const index in sortedByPriority){
+    for (const index in sortedByPriority) {
         const report = sortedByPriority[index]
         let lastString = fs.existsSync("./results/" + itemName + ".txt") ? fs.readFileSync("./results/" + itemName + ".txt") : ""
         fs.writeFileSync("./results/" + itemName + ".txt", lastString += report.printString)
@@ -75,6 +73,7 @@ const createFinalReport = (reports, containsNoMaxscore, containsCustomRP, itemNa
     //overview
     let printString = ""
     printString += "OVERSIKT:" + "\n"
+    printString += "Oppgaver totalt                   : " + numberOfItems + "\n"
     printString += "Oppgaver uten maxscore            : " + containsNoMaxscore + "\n"
     printString += "Oppgaver med egendefinert skåring : " + containsCustomRP + "\n"
     printString += "\n"
@@ -101,7 +100,7 @@ const checkAllTests = () => {
         fs.mkdirSync("./results")
     }
 
-    paths.forEach(async (p) => {
+    paths.forEach(async(p) => {
 
         const name = p.substring(0, p.length - 4)
 
